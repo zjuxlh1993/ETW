@@ -40,7 +40,7 @@
 #include <cms/Session.h>
 #include <cms/Destination.h>
 #include <cms/MessageProducer.h>
-#include <cms/TextMessage.h>
+#include <cms/BytesMessage.h>
 #include <cms/CMSException.h>
 #define MaxSendNum 10000
 using namespace cms;
@@ -224,7 +224,7 @@ unordered_map<DWORD, DWORD> keyname_map;
 unordered_map<DWORD, DWORD> messageID_Map;
 //global values for activeMQ
 std::auto_ptr<MessageProducer> producer;
-std::auto_ptr<TextMessage> message;
+std::auto_ptr<BytesMessage> message;
 std::auto_ptr<Session> session;
 auto_ptr<Connection> connection;
 void wmain(int argc, char* argv[])
@@ -557,11 +557,10 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 		if (!pidInWhitelist(CPID) && finishOP)
 		{
 			if (MessageCount % MaxSendNum == 0 && MessageCount != 0){
-				char *pdata;
-				pdata = (char*)data;
-				string str = string(pdata, MaxSendNum * 4);
+				BYTE *pdata;
+				pdata = (BYTE*)data;
 				try {
-					message.reset(session->createTextMessage(str));
+					message.reset(session->createBytesMessage(pdata,40000));
 				}
 				catch (CMSException e){
 					cout << e.getMessage();
