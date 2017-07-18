@@ -1,5 +1,4 @@
-﻿
-//Turns the DEFINE_GUID for EventTraceGuid into a const.
+﻿//Turns the DEFINE_GUID for EventTraceGuid into a const.
 #define INITGUID
 
 
@@ -172,9 +171,9 @@ L"SOFTWARE\\Microsoft\\CTF\\KnownClasses"
 
 ULONG g_TimerResolution = 0;
 
- //Used to determine if the session is a private session or kernel session.
- //You need to know this when accessing some members of the EVENT_TRACE.Header
- //member (for example, KernelTime or UserTime).
+//Used to determine if the session is a private session or kernel session.
+//You need to know this when accessing some members of the EVENT_TRACE.Header
+//member (for example, KernelTime or UserTime).
 
 BOOL g_bUserMode = FALSE;
 
@@ -214,7 +213,7 @@ UCHAR OPcode;
 
 // hash map for file name
 DWORD fileObject;
-unordered_map<DWORD ,string> fileNameMap;
+unordered_map<DWORD, string> fileNameMap;
 unordered_map<DWORD, short> ParmToNum;
 unordered_map<string, short> FToNum;
 unordered_map<DWORD, wchar_t*> ProcessName_map;
@@ -309,7 +308,7 @@ begin:
 	{
 		wprintf(L"OpenTrace failed with %lu\n", GetLastError());
 		goto cleanup;
-	}		
+	}
 
 	g_bUserMode = pHeader->LogFileMode & EVENT_TRACE_PRIVATE_LOGGER_MODE;
 
@@ -341,7 +340,7 @@ begin:
 
 cleanup:
 
-//	wprintf(L"The process is ended with %lu\n", status);
+	//	wprintf(L"The process is ended with %lu\n", status);
 	if (INVALID_PROCESSTRACE_HANDLE != g_hTrace)
 	{
 		status = CloseTrace(g_hTrace);
@@ -432,11 +431,19 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			CPID = *(DWORD*)pUserData;
 			pUserData += 40;
 			pUserData += GetLengthSid((PVOID)(pUserData));
-			wchar_t imagename[100];
-			swprintf(imagename, 100, L"%hs", (char*)(pUserData));
-			parm = imagename;
+			int len = strlen((char *)pUserData);
 			if (pEvent->EventHeader.EventDescriptor.Opcode == 1 || pEvent->EventHeader.EventDescriptor.Opcode == 3){
-				ProcessName_map[CPID] = parm;
+				ProcessName_map[CPID] = (wchar_t*)malloc((len + 1)*sizeof(wchar_t));
+				int i = 0;
+				wchar_t* st = ProcessName_map[CPID];
+				char* ch = (char *)pUserData;
+				while ((*ch) != 0){
+					*st = (wchar_t)(*ch);
+					st += 1;
+					ch += 1;
+					i += 1;
+				}
+				*st = 0;
 			}
 			goto cleanup;
 		}
@@ -560,14 +567,14 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 				BYTE *pdata;
 				pdata = (BYTE*)data;
 				try {
-					message.reset(session->createBytesMessage(pdata,40000));
+					message.reset(session->createBytesMessage(pdata, 40000));
 				}
 				catch (CMSException e){
 					cout << e.getMessage();
 					auto_ptr<Session> ss(connection->createSession());
 					session = ss;
 				}
-			
+
 				producer->send(message.get());
 			}
 			data[MessageCount%MaxSendNum] = ((EventType + 1) << 24) + ((parmnum + 1) << 16) + (((CPID / 255) + 1) << 8) + (CPID % 255 + 1);
@@ -616,7 +623,7 @@ BOOL pidInWhitelist(DWORD pid){
 string getEnv(const string& key, const string& defaultValue) {
 
 	try{
-				return System::getenv(key);
+		return System::getenv(key);
 	}
 	catch (...) {
 	}
@@ -642,7 +649,16 @@ VOID getallprocess()
 	BOOL   bFlag = Process32First(hSnapShot, &procentry);
 	while (bFlag)
 	{
-		ProcessName_map[procentry.th32ProcessID] = procentry.szExeFile;
+		int len = wcslen(procentry.szExeFile);
+		ProcessName_map[procentry.th32ProcessID] = (wchar_t*)malloc((len+1)*sizeof(wchar_t));
+		int i = 0;
+		wchar_t* st = ProcessName_map[procentry.th32ProcessID];
+		while ((procentry.szExeFile[i])!=0){
+			*st = procentry.szExeFile[i];
+			st += 1;
+			i += 1;
+		}
+		*st = 0;
 		bFlag = Process32Next(hSnapShot, &procentry);
 	}
 }
