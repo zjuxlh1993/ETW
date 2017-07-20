@@ -201,7 +201,7 @@ using namespace std;
 wofstream outFile;
 DWORD  MessageCount;
 DWORD curPID[4] = { 0L };
-int data[MaxSendNum + 1];
+BYTE data[MaxSendNum*6 + 1];
 getAddress g;
 string path = "";
 DWORD EventType;
@@ -209,13 +209,13 @@ wchar_t* parm;
 set<DWORD> whiteListPID;
 int CPID;
 int parmnum = 255;
+DWORD ALLmessages=0;
 UCHAR OPcode;
 
 // hash map for file name
 DWORD fileObject;
-unordered_map<DWORD, string> fileNameMap;
+unordered_map<DWORD, DWORD> keyhandleMap;
 unordered_map<DWORD, short> ParmToNum;
-unordered_map<string, short> FToNum;
 unordered_map<DWORD, wchar_t*> ProcessName_map;
 
 unordered_map<DWORD, DWORD> ThreadIDtoPID_map;
@@ -270,7 +270,7 @@ void wmain(int argc, char* argv[])
 
 	string user = getEnv("ACTIVEMQ_USER", "admin");
 	string password = getEnv("ACTIVEMQ_PASSWORD", "admin");
-	string host = getEnv("ACTIVEMQ_HOST", "127.0.0.1");
+	string host = getEnv("ACTIVEMQ_HOST", "10.214.148.122");
 	int port = Integer::parseInt(getEnv("ACTIVEMQ_PORT", "61616"));
 	string destination = getArg(argv, argc, 1, "new");
 
@@ -282,14 +282,13 @@ void wmain(int argc, char* argv[])
 	connection->start();
 	auto_ptr<Session> ss(connection->createSession());
 	session = ss;
-	auto_ptr<Destination> dest(session->createQueue(destination));
+	auto_ptr<Destination> dest(session->createTopic(destination));
 	auto_ptr<MessageProducer> pp(session->createProducer(dest.get()));
 	producer = pp;
 
 	producer->setDeliveryMode(DeliveryMode::NON_PERSISTENT);
 	cout << "Initialized." << endl;
 	MessageCount = 0L;
-	data[MaxSendNum] = 0;
 begin:
 	TDHSTATUS status = ERROR_SUCCESS;
 	EVENT_TRACE_LOGFILE trace;
@@ -359,6 +358,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 	DWORD PointerSize = 0;
 	ULONGLONG TimeStamp = 0;
 	ULONGLONG Nanoseconds = 0;
+	ALLmessages++;
 	finishOP = false;
 	CPID = 0;
 	OPcode = pEvent->EventHeader.EventDescriptor.Opcode;
@@ -421,6 +421,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 					EventType = 39;
 					finishOP = true;
 					parmnum = ParaList[ProcessName_map[CPID]];
+					CPID = messageID_Map[messageID];
 				}
 				goto cleanup;
 			}
@@ -469,7 +470,6 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 				parm = (wchar_t*)last_backslash;
 				if (ParaList.find(parm) == ParaList.end()) goto cleanup; else parmnum = ParaList[parm];
 				keyname_map[keyhandle] = parmnum;
-
 			}
 			else{
 				if (keyname_map.find(keyhandle) == keyname_map.end()) goto cleanup; else parmnum = keyname_map[keyhandle];
@@ -564,10 +564,8 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 		if (!pidInWhitelist(CPID) && finishOP)
 		{
 			if (MessageCount % MaxSendNum == 0 && MessageCount != 0){
-				BYTE *pdata;
-				pdata = (BYTE*)data;
 				try {
-					message.reset(session->createBytesMessage(pdata, 40000));
+					message.reset(session->createBytesMessage(data, MaxSendNum*6));
 				}
 				catch (CMSException e){
 					cout << e.getMessage();
@@ -577,7 +575,12 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 
 				producer->send(message.get());
 			}
-			data[MessageCount%MaxSendNum] = ((EventType + 1) << 24) + ((parmnum + 1) << 16) + (((CPID / 255) + 1) << 8) + (CPID % 255 + 1);
+			data[(MessageCount%MaxSendNum) * 6] = ALLmessages % 255 + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 1] = (ALLmessages / 255) % 255 + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 2] = CPID % 255 + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 3] = (CPID / 255) % 255 + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 4] = parmnum + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 5] = EventType + 1;
 			MessageCount++;
 			//string messageBody = ss.str();
 			//reset
@@ -650,10 +653,10 @@ VOID getallprocess()
 	while (bFlag)
 	{
 		int len = wcslen(procentry.szExeFile);
-		ProcessName_map[procentry.th32ProcessID] = (wchar_t*)malloc((len+1)*sizeof(wchar_t));
+		ProcessName_map[procentry.th32ProcessID] = (wchar_t*)malloc((len + 1)*sizeof(wchar_t));
 		int i = 0;
 		wchar_t* st = ProcessName_map[procentry.th32ProcessID];
-		while ((procentry.szExeFile[i])!=0){
+		while ((procentry.szExeFile[i]) != 0){
 			*st = procentry.szExeFile[i];
 			st += 1;
 			i += 1;
