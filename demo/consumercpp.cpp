@@ -62,7 +62,7 @@ struct hash_func
 	//BKDR hash algorithm，有关字符串hash函数，可以去找找资料看看
 	int operator()(const wchar_t * str)const
 	{
-		int seed = 131;//31  131 1313 13131131313 etc//
+		int seed = 131;//31  131 1313 13131131313 etc，建议是素数，其实hash函数有几个类型，这只是其中一种
 		int hash = 0;
 		while (*str)
 		{
@@ -81,7 +81,7 @@ struct cmp
 		return wcscmp(str1, str2) == 0;
 	}
 };
-unordered_map<const wchar_t*, int, hash_func, cmp> ParaList;
+unordered_map<const wchar_t*, int, hash_func, cmp> ParaList;//unordered_map不支持wchar_t*需要自己写hash函数与比较函数，顺带一句，unordered_map使用的是优化过的红黑树
 wchar_t* SysParaList[] = { L"NtGdiCreateCompatibleDC",
 L"NtGdiGetDIBitsInternal",
 L"NtUserGetDC",
@@ -209,7 +209,6 @@ wchar_t* parm;
 set<DWORD> whiteListPID;
 int CPID;
 int parmnum = 255;
-DWORD ALLmessages=0;
 UCHAR OPcode;
 
 // hash map for file name
@@ -221,6 +220,7 @@ unordered_map<DWORD, wchar_t*> ProcessName_map;
 unordered_map<DWORD, DWORD> ThreadIDtoPID_map;
 unordered_map<DWORD, DWORD> keyname_map;
 unordered_map<DWORD, DWORD> messageID_Map;
+unordered_map<DWORD, DWORD> couteachprocesseventnumber;
 //global values for activeMQ
 std::auto_ptr<MessageProducer> producer;
 std::auto_ptr<BytesMessage> message;
@@ -229,11 +229,11 @@ auto_ptr<Connection> connection;
 void wmain(int argc, char* argv[])
 
 {
-	getallprocess();
-	getallthread();
-	whiteListPID.clear();
+	getallprocess();//建立当前系统进程ID与进程名对应的map
+	getallthread();//建立当前PID与threadID对应的map
+	whiteListPID.clear();//建立白名单
 	whiteListPID.insert(GetCurrentProcessId());
-	for (int i = 0; i != 83; i++){
+	for (int i = 0; i != 83; i++){//将signature中参数写入map中
 		ParaList[SysParaList[i]] = i;
 	}
 	for (unordered_map<DWORD, wchar_t*>::iterator ix = g.addressToName.begin(); ix != g.addressToName.end(); ix++){
@@ -262,7 +262,7 @@ void wmain(int argc, char* argv[])
 	//addrSrv.sin_family = AF_INET;
 	//addrSrv.sin_port = htons(6000);
 	//int ret = connect(sockClient, (SOCKADDR*)&addrSrv, sizeof(SOCKADDR));
-	activemq::library::ActiveMQCPP::initializeLibrary();
+	activemq::library::ActiveMQCPP::initializeLibrary();/*activeMQ初始化部分*/
 
 	cout << "=====================================================\n";
 	cout << "Starting the Publisher :" << std::endl;
@@ -358,7 +358,6 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 	DWORD PointerSize = 0;
 	ULONGLONG TimeStamp = 0;
 	ULONGLONG Nanoseconds = 0;
-	ALLmessages++;
 	finishOP = false;
 	CPID = 0;
 	OPcode = pEvent->EventHeader.EventDescriptor.Opcode;
@@ -371,7 +370,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 	// Skips the event if it is not SysClEnter(51) or CSwitch(36).
 	else
 	if (
-		(OPcode == 10 && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e)
+		(OPcode == 10 && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e)//刷选event
 		|| (OPcode == 11 && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e)
 		|| (OPcode == 13 && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e)
 		|| (OPcode == 16 && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e)
@@ -388,7 +387,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 		)
 	{
 		pUserData = (DWORD)pEvent->UserData;
-		if (OPcode == 51){
+		if (OPcode == 51){//systemcall
 			DWORD address = (*(DWORD *)pUserData) & 0xFFFFFFF;
 			if (g.addressToName.find(address) != g.addressToName.end())
 				parmnum = ParmToNum[address];
@@ -400,8 +399,8 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 		}
 		else
 		if ((OPcode == 33 && pEvent->EventHeader.ProviderId.Data1 == 0x45d8cccd)
-			|| (OPcode == 34 && pEvent->EventHeader.ProviderId.Data1 == 0x45d8cccd)){
-			if (OPcode == 33)
+			|| (OPcode == 34 && pEvent->EventHeader.ProviderId.Data1 == 0x45d8cccd)){//ALPC_REC与ALPC_SEN具体可到msdn上根据opcode与guid细查
+			if (OPcode == 33)//将发送着的CPID记录
 			{
 				DWORD messageID = *(DWORD*)(pUserData);
 				CPID = pEvent->EventHeader.ProcessId;
@@ -412,7 +411,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			{
 				CPID = pEvent->EventHeader.ProcessId;
 				DWORD messageID = *(DWORD*)(pUserData);
-				if (messageID_Map.find(messageID) != messageID_Map.end() && ProcessName_map.find(messageID_Map[messageID]) != ProcessName_map.end() && ParaList.find(ProcessName_map[messageID_Map[messageID]]) != ParaList.end()){
+				if (messageID_Map.find(messageID) != messageID_Map.end() && ProcessName_map.find(messageID_Map[messageID]) != ProcessName_map.end() && ParaList.find(ProcessName_map[messageID_Map[messageID]]) != ParaList.end()){//判断是不是在paralist中
 					EventType = 38;
 					finishOP = true;
 					parmnum = ParaList[ProcessName_map[messageID_Map[messageID]]];
@@ -427,11 +426,11 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			}
 		}
 		else
-		if (OPcode == 1 && pEvent->EventHeader.ProviderId.Data1 == 0x3d6fa8d0){
+		if (OPcode == 1 && pEvent->EventHeader.ProviderId.Data1 == 0x3d6fa8d0){//维护processname与PID的map
 			pUserData += 8;
 			CPID = *(DWORD*)pUserData;
 			pUserData += 40;
-			pUserData += GetLengthSid((PVOID)(pUserData));
+			pUserData += GetLengthSid((PVOID)(pUserData));//SID是非固定长度的要获得其长度
 			int len = strlen((char *)pUserData);
 			if (pEvent->EventHeader.EventDescriptor.Opcode == 1 || pEvent->EventHeader.EventDescriptor.Opcode == 3){
 				ProcessName_map[CPID] = (wchar_t*)malloc((len + 1)*sizeof(wchar_t));
@@ -449,7 +448,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			goto cleanup;
 		}
 		else
-		if (OPcode == 1 && pEvent->EventHeader.ProviderId.Data1 == 0x3d6fa8d1){
+		if (OPcode == 1 && pEvent->EventHeader.ProviderId.Data1 == 0x3d6fa8d1){//threadstart，维护pid与threadid的map
 			CPID = *(DWORD*)pUserData;
 			pUserData += 4;
 			DWORD threadid = *(DWORD*)pUserData;
@@ -457,7 +456,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			goto cleanup;
 		}
 		else
-		if ((OPcode == 10 || OPcode == 13 || OPcode == 16 || OPcode == 11) && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e){
+		if ((OPcode == 10 || OPcode == 13 || OPcode == 16 || OPcode == 11) && pEvent->EventHeader.ProviderId.Data1 == 0xae53722e){//注册表，注意13与16keyname项为空
 			pUserData += 16;
 			DWORD keyhandle = *(DWORD*)pUserData;
 			if (OPcode == 10 || OPcode == 11){
@@ -498,7 +497,7 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			goto cleanup;
 		}
 		else
-		if (OPcode == 32 && pUserData&& pEvent->EventHeader.ProviderId.Data1 == 0x90cbdc39){
+		if (OPcode == 32 && pUserData&& pEvent->EventHeader.ProviderId.Data1 == 0x90cbdc39){//fileopen
 			//fileObject = *(DWORD *)pUserData;
 			pUserData += 8;
 			//strName = "NtCreateFile";
@@ -515,14 +514,14 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 			goto cleanup;
 		}
 		else
-		if (OPcode == 36 && pEvent->EventHeader.ProviderId.Data1 == 1030727889){
+		if (OPcode == 36 && pEvent->EventHeader.ProviderId.Data1 == 1030727889){//线程切换，维护每个线程当前运行的进程号
 			DWORD threadID = *(DWORD *)pUserData;
 			int processorID = pEvent->BufferContext.ProcessorNumber;
 			curPID[processorID] = GetProcessIdOfThread(OpenThread(THREAD_QUERY_INFORMATION, false, threadID));
 			if (curPID[processorID] == 0) curPID[processorID] = ThreadIDtoPID_map[threadID];
 			goto cleanup;
 		}
-		if (OPcode == 64 && pEvent->EventHeader.ProviderId.Data1 == 0x90cbdc39){
+		if (OPcode == 64 && pEvent->EventHeader.ProviderId.Data1 == 0x90cbdc39){//filecreat
 			pUserData += 8;
 			DWORD threadID = *(DWORD *)pUserData;
 			CPID = GetProcessIdOfThread(OpenThread(THREAD_QUERY_INFORMATION, false, threadID));
@@ -575,12 +574,18 @@ VOID WINAPI ProcessEvent(PEVENT_RECORD pEvent)
 
 				producer->send(message.get());
 			}
-			data[(MessageCount%MaxSendNum) * 6] = ALLmessages % 255 + 1;
-			data[(MessageCount%MaxSendNum) * 6 + 1] = (ALLmessages / 255) % 255 + 1;
-			data[(MessageCount%MaxSendNum) * 6 + 2] = CPID % 255 + 1;
+			if (couteachprocesseventnumber.find(CPID) != couteachprocesseventnumber.end()){
+				couteachprocesseventnumber[CPID]++;
+			}
+			else{
+				couteachprocesseventnumber[CPID] = 1;
+			}
+			data[(MessageCount%MaxSendNum) * 6] = couteachprocesseventnumber[CPID] % 255 + 1;//编码第一、二位是每个pid发送messager的编号
+			data[(MessageCount%MaxSendNum) * 6 + 1] = (couteachprocesseventnumber[CPID] / 255) % 255 + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 2] = CPID % 255 + 1;//三四位是cpid
 			data[(MessageCount%MaxSendNum) * 6 + 3] = (CPID / 255) % 255 + 1;
-			data[(MessageCount%MaxSendNum) * 6 + 4] = parmnum + 1;
-			data[(MessageCount%MaxSendNum) * 6 + 5] = EventType + 1;
+			data[(MessageCount%MaxSendNum) * 6 + 4] = parmnum + 1;//parmnum
+			data[(MessageCount%MaxSendNum) * 6 + 5] = EventType + 1;//eventtype
 			MessageCount++;
 			//string messageBody = ss.str();
 			//reset
