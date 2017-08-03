@@ -1615,7 +1615,7 @@ PBYTE PrintProperties(PEVENT_RECORD pEvent, PTRACE_EVENT_INFO pInfo, DWORD Point
 						parm += ": ";
 						parm += string(W2A(pFormattedData));
 						parm += "\", ";
-					}
+					}else
 					if (wcscmp(L"FileName", (PWCHAR)((PBYTE)(pInfo)+pInfo->EventPropertyInfoArray[i].NameOffset)) == 0
 						)
 					{
